@@ -30,7 +30,7 @@ async def create_pipeline(
             description=pipeline_data.description,
             pipeline_type=pipeline_data.pipeline_type,
             current_state=PipelineState.PENDING,
-            metadata=pipeline_data.metadata or {},
+            metadata_col=pipeline_data.metadata_col or {},
             created_by=pipeline_data.created_by
         )
         db.add(new_pipeline)
@@ -49,7 +49,7 @@ async def create_pipeline(
         db.add(audit_log)
         await db.commit()
         
-        return PipelineResponse.from_orm(new_pipeline)
+        return PipelineResponse.from_attributes(new_pipeline)
     except Exception as e:
         logger.error(f"Error creating pipeline: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -64,7 +64,7 @@ async def list_pipelines(
 ):
     """List all pipelines with optional filtering"""
     try:
-        query = select(Pipeline)
+        query = select(Pipeline).where(Pipeline.is_deleted == False)
         
         if state:
             query = query.where(Pipeline.current_state == state)
@@ -76,7 +76,7 @@ async def list_pipelines(
         result = await db.execute(query)
         pipelines = result.scalars().all()
         
-        return [PipelineResponse.from_orm(p) for p in pipelines]
+        return [PipelineResponse.from_attributes(p) for p in pipelines]
     except Exception as e:
         logger.error(f"Error listing pipelines: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -88,14 +88,14 @@ async def get_pipeline(
 ):
     """Get a specific pipeline by ID"""
     try:
-        query = select(Pipeline).where(Pipeline.id == pipeline_id)
+        query = select(Pipeline).where(and_(Pipeline.id == pipeline_id, Pipeline.is_deleted == False))
         result = await db.execute(query)
         pipeline = result.scalar_one_or_none()
         
         if not pipeline:
             raise HTTPException(status_code=404, detail="Pipeline not found")
         
-        return PipelineResponse.from_orm(pipeline)
+        return PipelineResponse.from_attributes(pipeline)
     except HTTPException:
         raise
     except Exception as e:
@@ -111,7 +111,7 @@ async def update_pipeline(
 ):
     """Update pipeline state and metadata"""
     try:
-        query = select(Pipeline).where(Pipeline.id == pipeline_id)
+        query = select(Pipeline).where(and_(Pipeline.id == pipeline_id, Pipeline.is_deleted == False))
         result = await db.execute(query)
         pipeline = result.scalar_one_or_none()
         
@@ -126,7 +126,7 @@ async def update_pipeline(
                 to_state=update_data.current_state,
                 transition_reason=update_data.transition_reason,
                 triggered_by=update_data.triggered_by or "SYSTEM",
-                metadata={"previous_metadata": pipeline.metadata}
+                metadata_col={"previous_metadata": pipeline.metadata_col}
             )
             db.add(state_history)
             
@@ -148,13 +148,13 @@ async def update_pipeline(
             pipeline.current_state = update_data.current_state
         
         # Update metadata
-        if update_data.metadata:
-            pipeline.metadata = {**pipeline.metadata, **update_data.metadata}
+        if update_data.metadata_col:
+            pipeline.metadata_col = {**pipeline.metadata_col, **update_data.metadata_col}
         
         pipeline.updated_at = datetime.utcnow()
         await db.commit()
         
-        return PipelineResponse.from_orm(pipeline)
+        return PipelineResponse.from_attributes(pipeline)
     except HTTPException:
         raise
     except Exception as e:
@@ -176,7 +176,7 @@ async def get_state_history(
         result = await db.execute(query)
         history = result.scalars().all()
         
-        return [PipelineStateHistoryResponse.from_orm(h) for h in history]
+        return [PipelineStateHistoryResponse.from_attributes(h) for h in history]
     except Exception as e:
         logger.error(f"Error fetching state history: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -195,7 +195,7 @@ async def get_audit_logs(
         result = await db.execute(query)
         logs = result.scalars().all()
         
-        return [AuditLogResponse.from_orm(log) for log in logs]
+        return [AuditLogResponse.from_attributes(log) for log in logs]
     except Exception as e:
         logger.error(f"Error fetching audit logs: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -206,7 +206,7 @@ async def delete_pipeline(
     db: AsyncSession = Depends(get_db),
     request: Request = None
 ):
-    """Delete a pipeline (soft delete via CANCELLED state)"""
+    """Delete a pipeline (soft delete via CANCELLED state and is_deleted flag)"""
     try:
         query = select(Pipeline).where(Pipeline.id == pipeline_id)
         result = await db.execute(query)
@@ -215,8 +215,8 @@ async def delete_pipeline(
         if not pipeline:
             raise HTTPException(status_code=404, detail="Pipeline not found")
         
-        # Mark as cancelled instead of hard delete for audit trail
         pipeline.current_state = PipelineState.CANCELLED
+        pipeline.is_deleted = True # Soft delete
         pipeline.updated_at = datetime.utcnow()
         
         state_history = PipelineStateHistory(
@@ -232,14 +232,14 @@ async def delete_pipeline(
             pipeline_id=pipeline.id,
             action="DELETED",
             actor="SYSTEM",
-            changes={"status": "cancelled"},
+            changes={"status": "cancelled", "is_deleted": True},
             ip_address=request.client.host if request else None,
             user_agent=request.headers.get("user-agent") if request else None
         )
         db.add(audit_log)
         
         await db.commit()
-        return {"message": "Pipeline cancelled", "id": str(pipeline.id)}
+        return {"message": "Pipeline cancelled and soft-deleted", "id": str(pipeline.id)}
     except HTTPException:
         raise
     except Exception as e:
@@ -247,13 +247,11 @@ async def delete_pipeline(
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-# ==================== DASHBOARD ENDPOINTS ====================
-
 @router.get("/dashboard/summary")
 async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     """Get pipeline summary for dashboard"""
     try:
-        query = select(Pipeline)
+        query = select(Pipeline).where(Pipeline.is_deleted == False)
         result = await db.execute(query)
         pipelines = result.scalars().all()
         
