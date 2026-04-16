@@ -5,17 +5,28 @@ from contextlib import asynccontextmanager
 from .database import Base, engine
 from .routes import router
 import logging
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create tables on startup
+# Environment variables
+ENV = os.getenv("ENVIRONMENT", "development")
+# Secure CORS: Default to localhost for dev, but require explicit setup for prod
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
+# Create tables on startup (ONLY in development)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    if ENV == "development":
+        logger.info("Development environment detected. Auto-creating database tables...")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        logger.info("Production environment detected. Relying on Alembic migrations.")
+        
     yield
     # Shutdown
     await engine.dispose()
@@ -27,10 +38,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# CORS middleware (Secured)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,7 +53,7 @@ app.include_router(router)
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "ok", "service": "Rubiscape ML Pipeline Tracker"}
+    return {"status": "ok", "environment": ENV, "service": "Rubiscape ML Pipeline Tracker"}
 
 @app.get("/")
 async def root():
