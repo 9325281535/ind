@@ -16,14 +16,20 @@ ENV = os.getenv("ENVIRONMENT", "development")
 # Secure CORS: Default to localhost for dev, but require explicit setup for prod
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
-# Create tables on startup (ONLY in development)
+# Create tables on startup (with safety net)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    logger.info("Starting up application...")
     if ENV == "development":
-        logger.info("Development environment detected. Auto-creating database tables...")
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        try:
+            logger.info("Attempting to auto-create database tables...")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Tables created successfully.")
+        except Exception as e:
+            logger.error(f"Failed to connect to database on startup: {e}")
+            logger.warning("App will start, but database operations will fail until connection is fixed.")
     else:
         logger.info("Production environment detected. Relying on Alembic migrations.")
         
@@ -38,7 +44,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware (Secured)
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -63,7 +69,3 @@ async def root():
         "docs": "/docs",
         "version": "1.0.0"
     }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
