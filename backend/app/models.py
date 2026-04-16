@@ -1,9 +1,9 @@
 # Data models definition
 from sqlalchemy import (
     Column, String, Text, DateTime, Index, ForeignKey, 
-    Enum, TIMESTAMP, func, INET, Boolean
+    Enum, TIMESTAMP, func, Boolean
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import relationship
 import uuid
 from datetime import datetime
