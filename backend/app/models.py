@@ -33,10 +33,7 @@ class Pipeline(Base):
     pipeline_type = Column(Enum(PipelineType), nullable=False)
     current_state = Column(Enum(PipelineState), nullable=False, default=PipelineState.PENDING)
     
-    # FIXED: Use JSONB and dict callable
     metadata_col = Column("metadata", JSONB, default=dict) 
-    
-    # NEW: Soft delete flag to protect audit history
     is_deleted = Column(Boolean, default=False, nullable=False) 
     
     created_by = Column(String(100), nullable=False)
@@ -47,11 +44,11 @@ class Pipeline(Base):
     state_history = relationship("PipelineStateHistory", back_populates="pipeline")
     audit_logs = relationship("AuditLog", back_populates="pipeline")
     
-    # Indexes
+    # Indexes (Fixed: Removed invalid postgresql_desc argument)
     __table_args__ = (
         Index("idx_pipelines_state", "current_state"),
         Index("idx_pipelines_type", "pipeline_type"),
-        Index("idx_pipelines_created", "created_at", postgresql_using="btree", postgresql_desc=True),
+        Index("idx_pipelines_created", "created_at", postgresql_using="btree"),
         Index("idx_pipelines_deleted", "is_deleted"),
     )
 
@@ -72,10 +69,10 @@ class PipelineStateHistory(Base):
     # Relationship
     pipeline = relationship("Pipeline", back_populates="state_history")
     
-    # Indexes
+    # Indexes (Fixed: Removed invalid postgresql_desc argument)
     __table_args__ = (
         Index("idx_history_pipeline", "pipeline_id"),
-        Index("idx_history_created", "created_at", postgresql_using="btree", postgresql_desc=True),
+        Index("idx_history_created", "created_at", postgresql_using="btree"),
     )
 
 # Table 3: Audit Logs (IMMUTABLE - append only)
@@ -97,10 +94,10 @@ class AuditLog(Base):
     # Relationship
     pipeline = relationship("Pipeline", back_populates="audit_logs")
     
-    # Indexes
+    # Indexes (Fixed: Removed invalid postgresql_desc argument)
     __table_args__ = (
         Index("idx_audit_pipeline", "pipeline_id"),
-        Index("idx_audit_created", "created_at", postgresql_using="btree", postgresql_desc=True),
+        Index("idx_audit_created", "created_at", postgresql_using="btree"),
         Index("idx_audit_actor", "actor"),
     )
 
@@ -109,7 +106,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 
 class PipelineStateHistoryResponse(BaseModel):
-    id: uuid.UUID # FIXED: Strict UUID typing
+    id: uuid.UUID 
     from_state: Optional[str]
     to_state: str
     transition_reason: Optional[str]
